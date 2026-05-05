@@ -55,6 +55,12 @@ interface ClipDao {
     @Query("UPDATE clips SET lastUsedAt = :timestamp WHERE id = :id")
     suspend fun updateLastUsed(id: Long, timestamp: Long = System.currentTimeMillis())
 
+    @Query("SELECT * FROM clips WHERE text = :text LIMIT 1")
+    suspend fun findByText(text: String): ClipEntity?
+
+    @Query("UPDATE clips SET isPinned = 1 WHERE id = :id")
+    suspend fun pin(id: Long)
+
     @Query("DELETE FROM clips WHERE id = :id")
     suspend fun delete(id: Long)
 

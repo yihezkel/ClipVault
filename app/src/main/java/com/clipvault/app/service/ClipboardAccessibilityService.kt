@@ -181,6 +181,16 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Public hook so other components (e.g. SettingsActivity) can ensure the global
+     * accessibility overlay is not covering a system dialog (e.g. Google sign-in consent).
+     */
+    fun dismissOverlayIfShowing() {
+        if (::overlayManager.isInitialized && overlayManager.isShowing) {
+            overlayManager.dismiss()
+        }
+    }
+
     private fun pasteText(text: String) {
         val clip = android.content.ClipData.newPlainText("ClipVault", text)
         clipboardManager.setPrimaryClip(clip)

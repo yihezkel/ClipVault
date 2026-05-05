@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.*
@@ -157,6 +158,15 @@ fun MainScreen(repository: ClipRepository) {
                                 Icons.Default.Delete,
                                 contentDescription = "Clear unpinned",
                                 tint = Color(0xFFFF6B6B)
+                            )
+                        }
+                        IconButton(onClick = {
+                            context.startActivity(Intent(context, SettingsActivity::class.java))
+                        }) {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }

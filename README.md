@@ -15,6 +15,7 @@ Built for Samsung Galaxy devices (S26 Ultra, etc.) where the built-in clipboard 
 - **Multi-select** — long-press to select multiple clips, then pin, unpin, or delete in bulk
 - **Lock screen aware** — overlay auto-dismisses when the screen turns off
 - **Manual entry** — add clips manually via the "+" button in both the overlay and the main app
+- **Google Drive sync** — pinned clips are mirrored to a hand-editable JSON file in your Drive (`/ClipVault/pinned-clips.json`); edits there propagate to every device on the next sync
 
 ## How It Works
 
@@ -46,8 +47,19 @@ com.clipvault.app/
 ├── overlay/
 │   ├── OverlayPanelManager.kt       # Overlay lifecycle, search, sort toggle, multi-select
 │   └── ClipAdapter.kt               # RecyclerView adapter with selection support
+├── sync/
+│   ├── SyncFileFormat.kt            # JSON schema for the cloud file
+│   ├── SyncMerge.kt                 # Pure 3-way merge by exact text identity
+│   ├── SyncSnapshot.kt              # Last-synced pinned set (local file)
+│   ├── SyncPrefs.kt                 # SharedPreferences for revision/file ID/account
+│   ├── DriveClient.kt               # Google Drive v3 REST client (OkHttp)
+│   ├── GoogleAuth.kt                # Google Authorization API wrapper
+│   ├── SyncManager.kt               # Pull → 3-way merge → push orchestration
+│   ├── SyncWorker.kt                # WorkManager job
+│   └── SyncScheduler.kt             # Daily + on-demand scheduling
 └── ui/
-    └── MainActivity.kt              # Jetpack Compose settings/management screen
+    ├── MainActivity.kt              # Jetpack Compose settings/management screen
+    └── SettingsActivity.kt          # Sign-in, sync status, manual sync button
 ```
 
 ## Requirements
@@ -106,6 +118,64 @@ The app is designed to have minimal impact on normal phone usage:
 - Accessibility events are filtered to only notifications/announcements (not every UI event)
 - Clipboard polling runs once every 30 seconds (one lightweight binder call)
 - No wake locks, no foreground notification, no background location
+
+## Cloud sync setup (one-time, before first sign-in)
+
+ClipVault stores your pinned clips in a Google Drive JSON file you can hand-edit. The app uses Google's Authorization API and the Drive REST API directly, requesting only the **`drive.file`** scope — meaning ClipVault can only see and modify files it created itself, never the rest of your Drive. Because this is a sideloaded app, you must register a small Google Cloud project so Google trusts your APK. No code changes or embedded secrets are needed — Google identifies the app at runtime by package name + signing-cert SHA-1.
+
+1. Create a Google Cloud project at https://console.cloud.google.com.
+2. **APIs & Services → Library** → enable **Google Drive API**.
+3. **APIs & Services → OAuth consent screen** → User type: **External**. App name: ClipVault. Add yourself as a test user. (Personal Google Workspace accounts can use Internal instead.)
+4. **APIs & Services → Credentials → Create Credentials → OAuth client ID**:
+   - Application type: **Android**
+   - Package name: `com.clipvault.app`
+   - SHA-1 certificate fingerprint: the SHA-1 of the keystore that signs your APK. For a debug build, run `keytool -list -v -keystore "%USERPROFILE%\.android\debug.keystore" -alias androiddebugkey -storepass android -keypass android` and copy the SHA-1. If you later sign release APKs with a different keystore, register a second OAuth client with that SHA-1 (or you'll get sign-in errors after switching).
+5. Save. (No client ID needs to go into the app code.)
+6. Build & install ClipVault, open it, tap the **gear icon → Sign in with Google**, pick your account, grant Drive access. The first sync runs immediately and creates `/ClipVault/pinned-clips.json` in your Drive root.
+
+In the same gear-icon screen you can also **Sync now** on demand, view the last sync status, and **Sign out** (which clears local sync state but leaves the cloud file untouched).
+
+### Editing the cloud file by hand
+
+Open `pinned-clips.json` in Drive (web, desktop, or the mobile Drive app):
+
+```json
+{
+  "_comment": "ClipVault pinned clips. Edit this file …",
+  "schemaVersion": 1,
+  "lastUpdated": "2026-05-05T03:14:00.000Z",
+  "pins": [
+    { "text": "your pinned text", "createdAt": "2026-05-01T08:00:00.000Z" },
+    { "text": "another pin",      "note": "useful link" }
+  ]
+}
+```
+
+- Identity is the exact `text` value. To "rename" a pin, delete it and add a new one.
+- `note` and `createdAt` are optional. Leave `_comment` and `schemaVersion` alone.
+- Multi-line clips are encoded with `\n` escapes inside the JSON string.
+
+### When does sync run?
+
+- **Daily**, scheduled overnight by WorkManager (~3 AM local).
+- **Whenever you pin or unpin** a clip on the phone (debounced ~10 seconds).
+- **On demand** via Settings → "Sync now".
+
+### Conflict handling
+
+Identity is the exact text, so divergent edits are merged automatically: anything added on either side is kept; anything removed on either side is removed. There is no overwrite. For the truly paranoid, use **Sync now** before bulk-editing the cloud file to make sure local changes are pushed first.
+
+### Troubleshooting sync
+
+- **"Consent cancelled" / sign-in flashes and returns to Settings.** The Google Cloud OAuth client's package name + SHA-1 must exactly match the APK you installed. Re-check step 4. If you switched between debug and release builds, register a second OAuth client for the other SHA-1.
+- **"This app isn't verified" / 403 access_denied.** The OAuth consent screen is in **Testing** mode and your account isn't on the test-users list. Add it under **OAuth consent screen → Test users**.
+- **Drive API errors mentioning quotas or `accessNotConfigured`.** The Drive API isn't enabled for the Cloud project — re-do step 2.
+- **`pinned-clips.json` doesn't appear in Drive.** Open Drive web, search for `ClipVault`, and check the **owner** column — the file is owned by the signed-in account, which may not be your primary one. Because the app uses the `drive.file` scope, it can't see files it didn't create, so renaming or moving the file in Drive is fine but deleting it forces a fresh first-sync (and a new file).
+- **Logs.** Filter logcat by tag `ClipVaultSync` for sync errors, or `ClipVaultAuth` for sign-in errors.
+
+## Toolchain pinning
+
+The project is locked to **Gradle 8.13 + AGP 8.13.2 + Kotlin 2.1.0 + KSP 2.1.0-1.0.29**. Newer combinations (AGP 9, KSP 2.x) trigger a Room/KSP compatibility bug (`unexpected jvm signature V`) until Room is updated. If Android Studio offers to auto-upgrade these tools, decline.
 
 ## License
 
